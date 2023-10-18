@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  web:
+    image: nginx:latest
+    volumes:
+      - ./nginx-conf:/etc/nginx/conf.d
+      - ./public:/var/www/html
+    ports:
+      - "8080:80"
+    depends_on:
+      - php
+      - db
+    networks:
+      - app-network
+
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: php
+    volumes:
+      - ./public:/var/www/html
+    environment:
+      - DB_HOST=${DB_HOST}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - KAFKA_BROKERS=kafka:9092
+    networks:
+      - app-network
+    depends_on:
+      - db
+
+  db:
+    image: mysql:5.7
+    container_name: db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - app-network
+
+
+  cmak:
+    image: hlebalbau/kafka-manager
+    ports:
+      - "9000:9000"
+    environment:
+      ZK_HOSTS: zookeeper:2181
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    container_name: zookeeper
+    image: confluentinc/cp-zookeeper:latest
+    ports:
+      - "2181:2181"
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+    volumes:
+      - "./data/zookeeper/data:/var/lib/zookeeper/data"
+      - "./data/zookeeper/log:/var/lib/zookeeper/log"
+      - "./data/zookeeper/secrets:/var/lib/zookeeper/secrets"
+    networks:
+      - app-network
+    user: root
+
+  kafka:
+    container_name: kafka
+    image: confluentinc/cp-kafka:latest
+    environment:
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    depends_on:
+      - zookeeper
+    volumes:
+      - "./data/kafka/data:/var/lib/kafka/data"
+      - "./data/kafka/secrets:/var/lib/kafka/secrets"
+    networks:
+      - app-network
+    user: root
+
+  consumer:
+    container_name: consumer
+    build:
+      context: ./consumer
+      dockerfile: Dockerfile
+    depends_on:
+      - kafka
+      - db
+      - php
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  db_data:
